@@ -59,6 +59,9 @@ public final class Rules {
     private Rules() {
     }
 
+    @Rule(defaultValue = true, description = "Enables the /data get command for everyone")
+    public static boolean dataGetCommand;
+
     @Rule(defaultValue = true, description = "Enables the /dtp and /dimensionteleport commands for all spectators")
     public static boolean dtpCommand;
 
