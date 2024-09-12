@@ -1,7 +1,9 @@
 package net.earthcomputer.cheatlikedefnot;
 
 import com.mojang.logging.LogUtils;
+import net.fabricmc.fabric.api.command.v1.CommandRegistrationCallback;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.server.command.DataCommand;
 import org.slf4j.Logger;
 
 import java.io.BufferedReader;
@@ -14,6 +16,8 @@ import java.lang.annotation.Target;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
@@ -47,7 +51,19 @@ public final class Rules {
             } catch (IllegalAccessException e) {
                 throw new AssertionError(e);
             }
-            rules.add(new RuleInstance(field.getName(), fieldHandle, rule));
+            Method onSetMethod;
+            try {
+                onSetMethod = Rules.class.getDeclaredMethod(rule.onSetExecute());
+            } catch (NoSuchMethodException e) {
+                throw new AssertionError("Rules contains a rule with a non-existent onSetExecute method");
+            }
+            if (!onSetMethod.getReturnType().equals(void.class)) {
+                throw new AssertionError("Rules contains a rule with an onSetExecute method whose return type is not void");
+            }
+            if (onSetMethod.getParameterCount() != 0) {
+                throw new AssertionError("Rules contains a rule with an onSetExecute method whose parameter list is not empty");
+            }
+            rules.add(new RuleInstance(field.getName(), fieldHandle, onSetMethod, rule));
         }
         RULES = rules.toArray(RuleInstance[]::new);
     }
@@ -59,8 +75,11 @@ public final class Rules {
     private Rules() {
     }
 
-    @Rule(defaultValue = true, description = "Enables the /data get command for everyone")
+    @Rule(defaultValue = true, description = "Enables the /data get command for everyone", onSetExecute = "registerDataCommand")
     public static boolean dataGetCommand;
+    public static void registerDataCommand() {
+        CommandRegistrationCallback.EVENT.register((dispatcher, dedicated) -> DataCommand.register(dispatcher));
+    }
 
     @Rule(defaultValue = true, description = "Enables the /dtp and /dimensionteleport commands for all spectators")
     public static boolean dtpCommand;
@@ -82,6 +101,9 @@ public final class Rules {
 
     @Rule(defaultValue = true, description = "Enables spectators to use the /tp command to teleport to arbitrary coordinates")
     public static boolean spectatorTeleport;
+
+    // Default for onSetMethod Rule parameter
+    private static void emptyMethod() {}
 
     public static void load() {
         RuleInstance[] rules = getRules();
@@ -133,14 +155,20 @@ public final class Rules {
     public @interface Rule {
         boolean defaultValue();
         String description();
+        String onSetExecute() default "emptyMethod";
     }
 
-    public record RuleInstance(String name, VarHandle field, Rule metadata) {
+    public record RuleInstance(String name, VarHandle field, Method onSetMethod, Rule metadata) {
         public boolean get() {
             return (boolean) field.get();
         }
 
         public void set(boolean value) {
+            try {
+                onSetMethod.invoke(null);
+            } catch (IllegalAccessException | InvocationTargetException e) {
+                throw new AssertionError(e);
+            }
             field.set(value);
         }
     }
